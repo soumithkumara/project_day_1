@@ -1,6 +1,66 @@
-# project_day_1
-this respo takes care of the project for day 1
+# Real-World AI-Driven Analytics Solution Using Python
 
-##Real-World AI-Driven Analytics Solution Using Python
+## Project Topic
 
-Objective: The goal of this project is to design, implement, and evaluate a Python-based data analytics solution that addresses a real-world business or societal problem using core Python libraries and machine learning tools. Students will apply data preprocessing, exploratory data analysis, model development, and ethical evaluation, using techniques such as regression, classification, or clustering to deliver AI-driven insights. Students will work in teams to simulate the lifecycle of a data analytics project, including stakeholder problem framing, iterative development, model evaluation, and reflection on ethical use of AI. Dataset Suggestions Teams may use one of the following open-source datasets or propose an approved alternative: Healthcare: Heart Disease UCI, Diabetes 130-US hospitals Business: Online Retail dataset (UCI), Credit Card Default dataset Transportation: NYC Taxi Data Custom Data: Any dataset approved by the instructor, demonstrating adequate size and complexity Deliverable : Data Preprocessing and Initial Model Development Objective: To explore, clean, and transform the dataset, then build an initial AI model using Python libraries (e.g., pandas, scikit-learn, Matplotlib). Key Components: 1. Introduction & Problem Framing (0.5 pages) 2. Dataset Exploration & Preprocessing (1.5 pages) 3. Initial Model Development (1 page) 4. Team Collaboration Process (0.5 page) Tools and Libraries Required pandas, NumPy – Data manipulation Matplotlib, Seaborn – Visualization scikit-learn – Modeling and evaluation Dask (optional) – Large dataset support Google Colab – Collaboration and coding GitHub – Team version control
+This repository contains a complete initial analytics deliverable using the NYC Taxi and Limousine Commission Yellow Taxi Trip Record dataset. The project frames a transportation analytics problem: predicting whether a taxi trip is likely to last at least 30 minutes.
+
+The solution uses Python, pandas, NumPy, Matplotlib, Seaborn, and scikit-learn to download data, preprocess it, perform exploratory analysis, train an initial AI model, and evaluate ethical considerations.
+
+## Business Problem
+
+Taxi operators, dispatch teams, and city transportation planners need early signals about trip duration. A long-trip risk model can support driver shift planning, passenger wait-time estimates, airport operations, and congestion-aware service monitoring. This project treats the model as a decision-support tool, not a system for denying rides or penalizing neighborhoods.
+
+## Dataset
+
+- Source: NYC TLC Trip Record Data
+- File: Yellow Taxi Trip Records, January 2024
+- Direct data URL: https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-01.parquet
+- Data dictionary: https://www.nyc.gov/assets/tlc/downloads/pdf/data_dictionary_trip_records_yellow.pdf
+
+The raw parquet file is downloaded automatically into `data/raw/` and is not committed to GitHub because it is large.
+
+## Repository Structure
+
+```text
+.
+|-- data/
+|   `-- README.md
+|-- notebooks/
+|   |-- README.md
+|   `-- nyc_taxi_long_trip_model.ipynb
+|-- reports/
+|   |-- README.md
+|   |-- assignment_report.md
+|   |-- metrics.json
+|   |-- model_metrics.csv
+|   |-- model_coefficients.csv
+|   `-- figures/
+|-- src/
+|   `-- nyc_taxi_long_trip_model.py
+|-- requirements.txt
+`-- README.md
+```
+
+## How to Run
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe src\nyc_taxi_long_trip_model.py
+```
+
+The script downloads the official dataset, cleans it, trains a class-balanced logistic regression model, and writes charts plus metrics to `reports/`.
+
+To use a smaller sample while testing:
+
+```powershell
+.\.venv\Scripts\python.exe src\nyc_taxi_long_trip_model.py --sample-size 30000
+```
+
+## Deliverables
+
+- Written assignment report: `reports/assignment_report.md`
+- Reproducible Python pipeline: `src/nyc_taxi_long_trip_model.py`
+- Generated model metrics: `reports/metrics.json` and `reports/model_metrics.csv`
+- EDA and evaluation charts: `reports/figures/`
+- GitHub-ready version control structure with ignored raw data and model binaries

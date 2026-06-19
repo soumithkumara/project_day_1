@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Large generated data files are reproducible from the official NYC TLC source.
+data/raw/
+data/processed/
+
+# Local model binaries can be regenerated with the pipeline.
+models/*.joblib
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
