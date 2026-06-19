@@ -41,6 +41,8 @@ Generated visualizations are stored in `reports/figures/`:
 - `confusion_matrix.png`: held-out test-set performance
 - `top_coefficients.png`: most influential model coefficients
 
+Detailed preprocessing evidence is saved in `reports/preprocessing_audit.csv`, `reports/feature_engineering_summary.csv`, and `reports/target_distribution.csv`. These files show the row counts before and after each cleaning rule, the exact engineered features, and the final target balance used for modeling.
+
 ## 3. Initial Model Development
 
 The initial AI model is a **class-balanced logistic regression classifier** implemented with scikit-learn. I chose logistic regression because it is fast, reproducible, and more explainable than a black-box model. Since this is an early-stage analytics solution for operational stakeholders, interpretability is valuable: the team can explain why the model produces higher or lower long-trip risk instead of only reporting predictions.

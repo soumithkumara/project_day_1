@@ -1,0 +1,14 @@
+step,description,rows_before,rows_after,rows_removed,step_removed_pct,retained_pct_of_raw
+01_raw_load,Loaded selected NYC TLC yellow taxi columns from parquet.,2964624,2964624,0,0.0,100.0
+02_derive_duration,Converted pickup/dropoff timestamps and created trip_duration_min.,2964624,2964624,0,0.0,100.0
+03_filter_pickup_month,Kept trips with pickup timestamps in January 2024.,2964624,2964606,18,0.0006,99.9994
+04_filter_duration,Removed trips shorter than 1 minute or longer than 180 minutes.,2964606,2927502,37104,1.2516,98.7478
+05_filter_distance,"Removed trips with zero, near-zero, negative, or extreme distances.",2927502,2888759,38743,1.3234,97.441
+06_filter_passengers,Kept trips with passenger_count from 1 to 6.,2888759,2741300,147459,5.1046,92.467
+07_filter_positive_fare,Removed trips with non-positive fare_amount.,2741300,2711653,29647,1.0815,91.467
+08_filter_positive_total,Removed trips with non-positive total_amount.,2711653,2711653,0,0.0,91.467
+09_filter_standard_ratecode,Kept standard TLC rate codes 1 through 6.,2711653,2684599,27054,0.9977,90.5545
+10_filter_pickup_zone,Kept valid TLC pickup location IDs from 1 to 265.,2684599,2684599,0,0.0,90.5545
+11_filter_dropoff_zone,Kept valid TLC dropoff location IDs from 1 to 265.,2684599,2684599,0,0.0,90.5545
+12_feature_engineering,"Created time, weekend, airport, target, and categorical model fields.",2684599,2684599,0,0.0,90.5545
+13_model_sample,Selected deterministic modeling sample with random_state=42.,2684599,120000,2564599,95.5301,4.0477

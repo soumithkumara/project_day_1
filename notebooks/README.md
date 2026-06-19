@@ -21,4 +21,4 @@ For Google Colab:
 
 4. View the generated charts in `reports/figures/` and metrics in `reports/metrics.json`.
 
-The notebook `nyc_taxi_long_trip_model.ipynb` also displays the metrics table, top model coefficients, and saved PNG charts inline after the pipeline finishes.
+The notebook `nyc_taxi_long_trip_model.ipynb` also displays the preprocessing audit, feature engineering summary, target distribution, metrics table, top model coefficients, and saved PNG charts inline after the pipeline finishes.

@@ -32,6 +32,9 @@ The raw parquet file is downloaded automatically into `data/raw/` and is not com
 |   |-- README.md
 |   |-- assignment_report.md
 |   |-- metrics.json
+|   |-- preprocessing_audit.csv
+|   |-- feature_engineering_summary.csv
+|   |-- target_distribution.csv
 |   |-- model_metrics.csv
 |   |-- model_coefficients.csv
 |   `-- figures/
@@ -62,5 +65,6 @@ To use a smaller sample while testing:
 - Written assignment report: `reports/assignment_report.md`
 - Reproducible Python pipeline: `src/nyc_taxi_long_trip_model.py`
 - Generated model metrics: `reports/metrics.json` and `reports/model_metrics.csv`
+- Detailed preprocessing audit: `reports/preprocessing_audit.csv`
 - EDA and evaluation charts: `reports/figures/`
 - GitHub-ready version control structure with ignored raw data and model binaries

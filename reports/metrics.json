@@ -8,6 +8,37 @@
     "median_duration_min": 11.6,
     "median_distance_miles": 1.7
   },
+  "target_distribution": {
+    "under_30_min": 109463,
+    "long_30_plus_min": 10537,
+    "long_trip_rate": 0.0878
+  },
+  "model_inputs": {
+    "numeric_features": [
+      "trip_distance",
+      "passenger_count",
+      "pickup_hour",
+      "pickup_dayofweek",
+      "is_weekend",
+      "airport_trip"
+    ],
+    "categorical_features": [
+      "VendorID",
+      "RatecodeID",
+      "PULocationID",
+      "DOLocationID"
+    ],
+    "target": "long_trip",
+    "positive_class": "long_trip = 1 means trip duration is at least 30 minutes"
+  },
+  "train_test_split": {
+    "split_method": "80/20 stratified train-test split",
+    "random_state": 42,
+    "train_rows": 96000,
+    "test_rows": 24000,
+    "train_long_trip_rate": 0.0878,
+    "test_long_trip_rate": 0.0878
+  },
   "baseline_most_frequent": {
     "accuracy": 0.9122,
     "precision": 0.0,

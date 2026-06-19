@@ -1,0 +1,8 @@
+column,type,source,purpose
+trip_duration_min,derived numeric,tpep_dropoff_datetime - tpep_pickup_datetime,Used for cleaning and to create the long_trip target; not used as a model input.
+pickup_hour,derived numeric,hour from tpep_pickup_datetime,Captures daily travel and congestion cycles.
+pickup_dayofweek,derived numeric,"day of week from tpep_pickup_datetime, Monday=0",Captures weekday/weekend and commute-pattern differences.
+is_weekend,derived binary,pickup_dayofweek in Saturday or Sunday,Flags weekend operating patterns.
+airport_trip,derived binary,"pickup or dropoff zone in Newark, JFK, or LaGuardia TLC IDs",Flags trips involving major airport zones.
+long_trip,target binary,trip_duration_min >= 30,"Prediction target: 1 for long trips, 0 otherwise."
+"VendorID, RatecodeID, PULocationID, DOLocationID",converted categorical,integer IDs converted to strings,Prevents ID values from being treated as ordered numeric quantities.

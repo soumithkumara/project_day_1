@@ -126,30 +126,146 @@ def load_raw_data(path: Path) -> pd.DataFrame:
     return pd.read_parquet(path, columns=RAW_COLUMNS)
 
 
-def clean_and_engineer_features(raw: pd.DataFrame) -> pd.DataFrame:
-    """Clean TLC records and create modeling features."""
+def _audit_filter(
+    df: pd.DataFrame,
+    mask: pd.Series,
+    step: str,
+    description: str,
+    audit_rows: list[dict[str, Any]],
+    raw_rows: int,
+) -> pd.DataFrame:
+    """Apply one preprocessing filter and record its row impact."""
+    rows_before = len(df)
+    filtered = df.loc[mask].copy()
+    rows_after = len(filtered)
+    audit_rows.append(
+        {
+            "step": step,
+            "description": description,
+            "rows_before": rows_before,
+            "rows_after": rows_after,
+            "rows_removed": rows_before - rows_after,
+            "step_removed_pct": round(
+                ((rows_before - rows_after) / rows_before) * 100, 4
+            )
+            if rows_before
+            else 0.0,
+            "retained_pct_of_raw": round((rows_after / raw_rows) * 100, 4)
+            if raw_rows
+            else 0.0,
+        }
+    )
+    return filtered
+
+
+def preprocess_with_audit(
+    raw: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Clean TLC records, create modeling features, and document each change."""
     df = raw.copy()
+    raw_rows = len(df)
+    audit_rows: list[dict[str, Any]] = [
+        {
+            "step": "01_raw_load",
+            "description": "Loaded selected NYC TLC yellow taxi columns from parquet.",
+            "rows_before": raw_rows,
+            "rows_after": raw_rows,
+            "rows_removed": 0,
+            "step_removed_pct": 0.0,
+            "retained_pct_of_raw": 100.0,
+        }
+    ]
+
     df["tpep_pickup_datetime"] = pd.to_datetime(df["tpep_pickup_datetime"])
     df["tpep_dropoff_datetime"] = pd.to_datetime(df["tpep_dropoff_datetime"])
     df["trip_duration_min"] = (
         df["tpep_dropoff_datetime"] - df["tpep_pickup_datetime"]
     ).dt.total_seconds() / 60
+    audit_rows.append(
+        {
+            "step": "02_derive_duration",
+            "description": "Converted pickup/dropoff timestamps and created trip_duration_min.",
+            "rows_before": len(df),
+            "rows_after": len(df),
+            "rows_removed": 0,
+            "step_removed_pct": 0.0,
+            "retained_pct_of_raw": round((len(df) / raw_rows) * 100, 4),
+        }
+    )
 
-    jan_2024 = (
+    df = _audit_filter(
+        df,
         (df["tpep_pickup_datetime"] >= "2024-01-01")
-        & (df["tpep_pickup_datetime"] < "2024-02-01")
+        & (df["tpep_pickup_datetime"] < "2024-02-01"),
+        "03_filter_pickup_month",
+        "Kept trips with pickup timestamps in January 2024.",
+        audit_rows,
+        raw_rows,
     )
-    valid_ranges = (
-        df["trip_duration_min"].between(1, 180)
-        & df["trip_distance"].between(0.1, 60)
-        & df["passenger_count"].between(1, 6)
-        & (df["fare_amount"] > 0)
-        & (df["total_amount"] > 0)
-        & df["RatecodeID"].between(1, 6)
-        & df["PULocationID"].between(1, 265)
-        & df["DOLocationID"].between(1, 265)
+    df = _audit_filter(
+        df,
+        df["trip_duration_min"].between(1, 180),
+        "04_filter_duration",
+        "Removed trips shorter than 1 minute or longer than 180 minutes.",
+        audit_rows,
+        raw_rows,
     )
-    df = df.loc[jan_2024 & valid_ranges].copy()
+    df = _audit_filter(
+        df,
+        df["trip_distance"].between(0.1, 60),
+        "05_filter_distance",
+        "Removed trips with zero, near-zero, negative, or extreme distances.",
+        audit_rows,
+        raw_rows,
+    )
+    df = _audit_filter(
+        df,
+        df["passenger_count"].between(1, 6),
+        "06_filter_passengers",
+        "Kept trips with passenger_count from 1 to 6.",
+        audit_rows,
+        raw_rows,
+    )
+    df = _audit_filter(
+        df,
+        df["fare_amount"] > 0,
+        "07_filter_positive_fare",
+        "Removed trips with non-positive fare_amount.",
+        audit_rows,
+        raw_rows,
+    )
+    df = _audit_filter(
+        df,
+        df["total_amount"] > 0,
+        "08_filter_positive_total",
+        "Removed trips with non-positive total_amount.",
+        audit_rows,
+        raw_rows,
+    )
+    df = _audit_filter(
+        df,
+        df["RatecodeID"].between(1, 6),
+        "09_filter_standard_ratecode",
+        "Kept standard TLC rate codes 1 through 6.",
+        audit_rows,
+        raw_rows,
+    )
+    df = _audit_filter(
+        df,
+        df["PULocationID"].between(1, 265),
+        "10_filter_pickup_zone",
+        "Kept valid TLC pickup location IDs from 1 to 265.",
+        audit_rows,
+        raw_rows,
+    )
+    df = _audit_filter(
+        df,
+        df["DOLocationID"].between(1, 265),
+        "11_filter_dropoff_zone",
+        "Kept valid TLC dropoff location IDs from 1 to 265.",
+        audit_rows,
+        raw_rows,
+    )
 
     df["pickup_hour"] = df["tpep_pickup_datetime"].dt.hour
     df["pickup_dayofweek"] = df["tpep_pickup_datetime"].dt.dayofweek
@@ -163,6 +279,69 @@ def clean_and_engineer_features(raw: pd.DataFrame) -> pd.DataFrame:
     for column in CATEGORICAL_FEATURES:
         df[column] = df[column].astype("Int64").astype(str)
 
+    audit_rows.append(
+        {
+            "step": "12_feature_engineering",
+            "description": "Created time, weekend, airport, target, and categorical model fields.",
+            "rows_before": len(df),
+            "rows_after": len(df),
+            "rows_removed": 0,
+            "step_removed_pct": 0.0,
+            "retained_pct_of_raw": round((len(df) / raw_rows) * 100, 4),
+        }
+    )
+
+    feature_rows = [
+        {
+            "column": "trip_duration_min",
+            "type": "derived numeric",
+            "source": "tpep_dropoff_datetime - tpep_pickup_datetime",
+            "purpose": "Used for cleaning and to create the long_trip target; not used as a model input.",
+        },
+        {
+            "column": "pickup_hour",
+            "type": "derived numeric",
+            "source": "hour from tpep_pickup_datetime",
+            "purpose": "Captures daily travel and congestion cycles.",
+        },
+        {
+            "column": "pickup_dayofweek",
+            "type": "derived numeric",
+            "source": "day of week from tpep_pickup_datetime, Monday=0",
+            "purpose": "Captures weekday/weekend and commute-pattern differences.",
+        },
+        {
+            "column": "is_weekend",
+            "type": "derived binary",
+            "source": "pickup_dayofweek in Saturday or Sunday",
+            "purpose": "Flags weekend operating patterns.",
+        },
+        {
+            "column": "airport_trip",
+            "type": "derived binary",
+            "source": "pickup or dropoff zone in Newark, JFK, or LaGuardia TLC IDs",
+            "purpose": "Flags trips involving major airport zones.",
+        },
+        {
+            "column": TARGET,
+            "type": "target binary",
+            "source": "trip_duration_min >= 30",
+            "purpose": "Prediction target: 1 for long trips, 0 otherwise.",
+        },
+        {
+            "column": ", ".join(CATEGORICAL_FEATURES),
+            "type": "converted categorical",
+            "source": "integer IDs converted to strings",
+            "purpose": "Prevents ID values from being treated as ordered numeric quantities.",
+        },
+    ]
+
+    return df, pd.DataFrame(audit_rows), pd.DataFrame(feature_rows)
+
+
+def clean_and_engineer_features(raw: pd.DataFrame) -> pd.DataFrame:
+    """Clean TLC records and create modeling features."""
+    df, _, _ = preprocess_with_audit(raw)
     return df
 
 
@@ -337,6 +516,9 @@ def write_outputs(
     df: pd.DataFrame,
     raw_rows: int,
     clean_rows_before_sampling: int,
+    preprocessing_audit: pd.DataFrame,
+    feature_summary: pd.DataFrame,
+    split_summary: dict[str, Any],
     metrics: dict[str, Any],
     baseline_metrics: dict[str, Any],
     report: str,
@@ -358,6 +540,18 @@ def write_outputs(
             "median_duration_min": round(float(df["trip_duration_min"].median()), 2),
             "median_distance_miles": round(float(df["trip_distance"].median()), 2),
         },
+        "target_distribution": {
+            "under_30_min": int((df[TARGET] == 0).sum()),
+            "long_30_plus_min": int((df[TARGET] == 1).sum()),
+            "long_trip_rate": round(float(df[TARGET].mean()), 4),
+        },
+        "model_inputs": {
+            "numeric_features": NUMERIC_FEATURES,
+            "categorical_features": CATEGORICAL_FEATURES,
+            "target": TARGET,
+            "positive_class": "long_trip = 1 means trip duration is at least 30 minutes",
+        },
+        "train_test_split": split_summary,
         "baseline_most_frequent": baseline_metrics,
         "logistic_regression": metrics,
         "classification_report": report,
@@ -366,12 +560,32 @@ def write_outputs(
     with (report_dir / "metrics.json").open("w", encoding="utf-8") as file:
         json.dump(summary, file, indent=2)
 
+    preprocessing_audit.to_csv(report_dir / "preprocessing_audit.csv", index=False)
+    feature_summary.to_csv(report_dir / "feature_engineering_summary.csv", index=False)
+
     pd.DataFrame(
         [
             {"model": "Most frequent baseline", **baseline_metrics},
             {"model": "Balanced logistic regression", **metrics},
         ]
     ).to_csv(report_dir / "model_metrics.csv", index=False)
+
+    pd.DataFrame(
+        [
+            {
+                "target_value": 0,
+                "label": "Under 30 minutes",
+                "rows": int((df[TARGET] == 0).sum()),
+                "share": round(float((df[TARGET] == 0).mean()), 4),
+            },
+            {
+                "target_value": 1,
+                "label": "30+ minutes",
+                "rows": int((df[TARGET] == 1).sum()),
+                "share": round(float((df[TARGET] == 1).mean()), 4),
+            },
+        ]
+    ).to_csv(report_dir / "target_distribution.csv", index=False)
 
     coefficient_summary(model).to_csv(report_dir / "model_coefficients.csv", index=False)
     joblib.dump(model, model_dir / "long_trip_logistic_model.joblib")
@@ -381,10 +595,37 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
     raw_path = download_file(config.data_url, config.raw_path, config.force_download)
     raw = load_raw_data(raw_path)
     raw_rows = len(raw)
-    df = clean_and_engineer_features(raw)
+    df, preprocessing_audit, feature_summary = preprocess_with_audit(raw)
     clean_rows = len(df)
     if config.sample_size and len(df) > config.sample_size:
+        rows_before_sample = len(df)
         df = df.sample(n=config.sample_size, random_state=RANDOM_STATE)
+        preprocessing_audit = pd.concat(
+            [
+                preprocessing_audit,
+                pd.DataFrame(
+                    [
+                        {
+                            "step": "13_model_sample",
+                            "description": (
+                                "Selected deterministic modeling sample with "
+                                f"random_state={RANDOM_STATE}."
+                            ),
+                            "rows_before": rows_before_sample,
+                            "rows_after": len(df),
+                            "rows_removed": rows_before_sample - len(df),
+                            "step_removed_pct": round(
+                                ((rows_before_sample - len(df)) / rows_before_sample)
+                                * 100,
+                                4,
+                            ),
+                            "retained_pct_of_raw": round((len(df) / raw_rows) * 100, 4),
+                        }
+                    ]
+                ),
+            ],
+            ignore_index=True,
+        )
 
     x = df[FEATURES]
     y = df[TARGET]
@@ -395,6 +636,14 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
         random_state=RANDOM_STATE,
         stratify=y,
     )
+    split_summary = {
+        "split_method": "80/20 stratified train-test split",
+        "random_state": RANDOM_STATE,
+        "train_rows": int(len(x_train)),
+        "test_rows": int(len(x_test)),
+        "train_long_trip_rate": round(float(y_train.mean()), 4),
+        "test_long_trip_rate": round(float(y_test.mean()), 4),
+    }
 
     baseline = DummyClassifier(strategy="most_frequent")
     baseline.fit(x_train, y_train)
@@ -419,6 +668,9 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
         df,
         raw_rows,
         clean_rows,
+        preprocessing_audit,
+        feature_summary,
+        split_summary,
         metrics,
         baseline_metrics,
         report,
