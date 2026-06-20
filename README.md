@@ -27,6 +27,7 @@ The raw parquet file is downloaded automatically into `data/raw/` and is not com
 |   `-- README.md
 |-- notebooks/
 |   |-- README.md
+|   |-- predict_new_taxi_trip.ipynb
 |   `-- nyc_taxi_long_trip_model.ipynb
 |-- reports/
 |   |-- README.md
@@ -64,6 +65,7 @@ To use a smaller sample while testing:
 
 - Written assignment report: `reports/assignment_report.md`
 - Reproducible Python pipeline: `src/nyc_taxi_long_trip_model.py`
+- New-trip prediction notebook: `notebooks/predict_new_taxi_trip.ipynb`
 - Generated model metrics: `reports/metrics.json` and `reports/model_metrics.csv`
 - Detailed preprocessing audit: `reports/preprocessing_audit.csv`
 - EDA and evaluation charts: `reports/figures/`
