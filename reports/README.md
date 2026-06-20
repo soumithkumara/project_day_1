@@ -3,6 +3,7 @@
 Running `python src/nyc_taxi_long_trip_model.py` writes the project outputs here:
 
 - `assignment_report.md`: Deliverable 2 report covering tuning, final evaluation, ethics, real-world application, and conclusion.
+- `NYC_Taxi_Deliverable_2_Model_Optimization_Report.docx`: Word document version of the Deliverable 2 report.
 - `metrics.json`: dataset summary, baseline metrics, model metrics, and classification report.
 - `preprocessing_audit.csv`: row counts before/after each cleaning and sampling step.
 - `feature_engineering_summary.csv`: explanation of new or transformed columns.
