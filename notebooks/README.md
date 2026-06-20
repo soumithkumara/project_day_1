@@ -21,6 +21,8 @@ For Google Colab:
 
 4. View the generated charts in `reports/figures/` and metrics in `reports/metrics.json`.
 
-The notebook `nyc_taxi_long_trip_model.ipynb` also displays the preprocessing audit, feature engineering summary, target distribution, metrics table, tuning results, optimized feature importance, and saved PNG charts inline after the pipeline finishes.
+The notebook `nyc_taxi_long_trip_model_day2.ipynb` is the recommended fresh Colab notebook for Deliverable 2. It forces the `project_day_2` branch and displays the preprocessing audit, feature engineering summary, target distribution, metrics table, tuning results, optimized feature importance, and saved PNG charts inline after the pipeline finishes.
+
+If Colab keeps showing an older setup cell from `nyc_taxi_long_trip_model.ipynb`, open `nyc_taxi_long_trip_model_day2.ipynb` instead to avoid Colab cache.
 
 Use `predict_new_taxi_trip.ipynb` when you only want to pass a new taxi trip into the trained model and see whether it is predicted to be a 30+ minute trip.
