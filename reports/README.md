@@ -13,3 +13,5 @@ Running `python src/nyc_taxi_long_trip_model.py` writes the project outputs here
 - `model_feature_importance.csv`: permutation importance for the optimized final model.
 - `model_coefficients.csv`: reference coefficients from the initial logistic regression model.
 - `figures/`: exploratory and model evaluation charts used in the report.
+
+The latest submitted model is the optimized histogram gradient boosting classifier with a 0.35 decision threshold. It achieved 0.9417 accuracy, 0.6201 precision, 0.8685 recall, 0.7236 F1, and 0.9751 ROC-AUC on the held-out test set. The full one-file PDF submission packet is saved at `output/pdf/NYC_Taxi_Deliverable_2_Full_Submission_Report.pdf`.
