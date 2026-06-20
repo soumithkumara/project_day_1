@@ -8,7 +8,7 @@ For Google Colab:
 2. Clone this repo:
 
    ```python
-   !git clone https://github.com/soumithkumara/project_day_1.git
+   !git clone --branch project_day_2 https://github.com/soumithkumara/project_day_1.git
    %cd project_day_1
    ```
 

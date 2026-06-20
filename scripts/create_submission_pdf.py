@@ -285,7 +285,7 @@ def build_pdf():
     story.append(para("Use these commands in a Colab notebook if you are running from a blank session:", styles["BodyCustom"]))
     story.append(
         code_block(
-            """!git clone https://github.com/soumithkumara/project_day_1.git
+            """!git clone --branch project_day_2 https://github.com/soumithkumara/project_day_1.git
 %cd project_day_1
 !pip install -r requirements.txt
 !python src/nyc_taxi_long_trip_model.py""",
@@ -425,7 +425,7 @@ do_location_id = 48""",
     story.append(
         bullets(
             [
-                "If Colab cannot find files, run %cd /content/project_day_1 and then !git pull origin main.",
+                "If Colab cannot find files, run %cd /content/project_day_1 and then !git pull origin project_day_2.",
                 "If preprocessing_audit.csv is missing, run !python src/nyc_taxi_long_trip_model.py.",
                 "If the model file is missing, run the training pipeline; the model is generated locally as models/long_trip_optimized_model.joblib.",
                 "If Colab shows a NumPy binary error, choose Runtime > Restart session and run the updated notebook from the top.",
