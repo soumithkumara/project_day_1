@@ -243,7 +243,7 @@ def build_pdf():
             [
                 "Problem type: supervised binary classification.",
                 "Prediction target: long_trip, where 1 means 30+ minutes and 0 means under 30 minutes.",
-                "Model: class-balanced logistic regression with scikit-learn preprocessing.",
+                "Model: optimized histogram gradient boosting with a tuned precision-focused threshold.",
                 "Use case: operational planning for long-trip risk, not ride denial or punitive decision-making.",
                 "Repository: https://github.com/soumithkumara/project_day_1",
             ],
@@ -266,6 +266,8 @@ def build_pdf():
 |   |-- target_distribution.csv
 |   |-- model_metrics.csv
 |   |-- model_coefficients.csv
+|   |-- model_feature_importance.csv
+|   |-- tuning_results.csv
 |   `-- figures/
 |-- src/nyc_taxi_long_trip_model.py
 |-- scripts/
@@ -339,21 +341,23 @@ def build_pdf():
     story.append(para("7. Model Details and Metrics", styles["H1Custom"]))
     story.append(
         para(
-            "The AI model is a class-balanced logistic regression classifier. Numeric features are median-imputed and standardized. Categorical features are imputed with the most frequent value and one-hot encoded. The final model predicts class 0 for under 30 minutes and class 1 for 30 minutes or more.",
+            "The final AI model is an optimized histogram gradient boosting classifier. Numeric features are median-imputed, categorical features are ordinal-encoded, and a validation-selected probability threshold is used to predict class 0 for under 30 minutes or class 1 for 30 minutes or more.",
             styles["BodyCustom"],
         )
     )
     base = metrics["baseline_most_frequent"]
-    model = metrics["logistic_regression"]
+    initial = metrics["initial_logistic_regression"]
+    model = metrics["optimized_hist_gradient_boosting"]
     metric_table = [
         ["Model", "Accuracy", "Precision", "Recall", "F1", "ROC-AUC"],
         ["Most frequent baseline", f"{base['accuracy']:.4f}", f"{base['precision']:.4f}", f"{base['recall']:.4f}", f"{base['f1']:.4f}", f"{base['roc_auc']:.4f}"],
-        ["Balanced logistic regression", f"{model['accuracy']:.4f}", f"{model['precision']:.4f}", f"{model['recall']:.4f}", f"{model['f1']:.4f}", f"{model['roc_auc']:.4f}"],
+        ["Balanced logistic regression", f"{initial['accuracy']:.4f}", f"{initial['precision']:.4f}", f"{initial['recall']:.4f}", f"{initial['f1']:.4f}", f"{initial['roc_auc']:.4f}"],
+        ["Optimized gradient boosting", f"{model['accuracy']:.4f}", f"{model['precision']:.4f}", f"{model['recall']:.4f}", f"{model['f1']:.4f}", f"{model['roc_auc']:.4f}"],
     ]
     story.append(make_table(metric_table, [2.0, 0.85, 0.85, 0.85, 0.75, 0.85], font_size=8))
     story.append(
         para(
-            f"The most important practical metric is recall. The model achieved recall of {model['recall']:.4f}, meaning it caught about {model['recall'] * 100:.1f}% of actual long trips in the held-out test set.",
+            f"The optimized model uses a tuned decision threshold of {model['decision_threshold']:.2f}. It improves precision to {model['precision']:.4f} and accuracy to {model['accuracy']:.4f} while keeping recall at {model['recall']:.4f} on the held-out test set.",
             styles["BodyCustom"],
         )
     )
@@ -384,8 +388,10 @@ do_location_id = 48""",
             [
                 "reports/metrics.json - dataset, target distribution, split summary, and model metrics.",
                 "reports/preprocessing_audit.csv - row counts before and after each cleaning step.",
-                "reports/model_metrics.csv - compact baseline versus logistic regression table.",
-                "reports/model_coefficients.csv - interpretable logistic regression coefficients.",
+                "reports/model_metrics.csv - compact baseline, initial logistic, and optimized model table.",
+                "reports/tuning_results.csv - validation hyperparameter and threshold tuning results.",
+                "reports/model_feature_importance.csv - permutation importance for the optimized model.",
+                "reports/model_coefficients.csv - reference coefficients from the initial logistic model.",
                 "reports/figures/ - charts and confusion matrix.",
                 "reports/NYC_Taxi_AI_Analytics_APA7_Report.docx - APA 7 written report.",
             ],
@@ -397,7 +403,8 @@ do_location_id = 48""",
     story.append(para("10. Key Figures", styles["H1Custom"]))
     add_figure(story, REPORTS / "figures" / "duration_distribution.png", "Figure 1. Distribution of cleaned trip duration.", styles)
     add_figure(story, REPORTS / "figures" / "hourly_long_trip_rate.png", "Figure 2. Long-trip rate by pickup hour.", styles)
-    add_figure(story, REPORTS / "figures" / "confusion_matrix.png", "Figure 3. Balanced logistic regression confusion matrix.", styles)
+    add_figure(story, REPORTS / "figures" / "confusion_matrix.png", "Figure 3. Optimized model confusion matrix.", styles)
+    add_figure(story, REPORTS / "figures" / "feature_importance.png", "Figure 4. Optimized model feature importance.", styles)
 
     story.append(PageBreak())
     story.append(para("11. Core Prediction Notebook Code", styles["H1Custom"]))
@@ -420,7 +427,7 @@ do_location_id = 48""",
             [
                 "If Colab cannot find files, run %cd /content/project_day_1 and then !git pull origin main.",
                 "If preprocessing_audit.csv is missing, run !python src/nyc_taxi_long_trip_model.py.",
-                "If the model file is missing, run the training pipeline; the model is generated locally as models/long_trip_logistic_model.joblib.",
+                "If the model file is missing, run the training pipeline; the model is generated locally as models/long_trip_optimized_model.joblib.",
                 "If Colab shows a NumPy binary error, choose Runtime > Restart session and run the updated notebook from the top.",
                 "Raw data and model binaries are intentionally not committed to GitHub because they are reproducible generated files.",
             ],

@@ -4,7 +4,7 @@
 
 This repository contains a complete initial analytics deliverable using the NYC Taxi and Limousine Commission Yellow Taxi Trip Record dataset. The project frames a transportation analytics problem: predicting whether a taxi trip is likely to last at least 30 minutes.
 
-The solution uses Python, pandas, NumPy, Matplotlib, Seaborn, and scikit-learn to download data, preprocess it, perform exploratory analysis, train an initial AI model, and evaluate ethical considerations.
+The solution uses Python, pandas, NumPy, Matplotlib, Seaborn, and scikit-learn to download data, preprocess it, perform exploratory analysis, tune an optimized AI model, and evaluate ethical/practical considerations.
 
 ## Business Problem
 
@@ -38,6 +38,8 @@ The raw parquet file is downloaded automatically into `data/raw/` and is not com
 |   |-- target_distribution.csv
 |   |-- model_metrics.csv
 |   |-- model_coefficients.csv
+|   |-- model_feature_importance.csv
+|   |-- tuning_results.csv
 |   `-- figures/
 |-- src/
 |   `-- nyc_taxi_long_trip_model.py
@@ -55,7 +57,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe src\nyc_taxi_long_trip_model.py
 ```
 
-The script downloads the official dataset, cleans it, trains a class-balanced logistic regression model, and writes charts plus metrics to `reports/`.
+The script downloads the official dataset, cleans it, tunes a histogram gradient boosting classifier, selects a precision-focused decision threshold, and writes charts plus metrics to `reports/`.
 
 To use a smaller sample while testing:
 
@@ -65,11 +67,13 @@ To use a smaller sample while testing:
 
 ## Deliverables
 
-- Written assignment report: `reports/assignment_report.md`
+- Written Deliverable 2 report: `reports/assignment_report.md`
 - Reproducible Python pipeline: `src/nyc_taxi_long_trip_model.py`
 - New-trip prediction notebook: `notebooks/predict_new_taxi_trip.ipynb`
 - One-file submission PDF: `output/pdf/NYC_Taxi_AI_Analytics_Submission_Guide.pdf`
 - Generated model metrics: `reports/metrics.json` and `reports/model_metrics.csv`
+- Hyperparameter tuning results: `reports/tuning_results.csv`
+- Final model feature importance: `reports/model_feature_importance.csv`
 - Detailed preprocessing audit: `reports/preprocessing_audit.csv`
 - EDA and evaluation charts: `reports/figures/`
 - GitHub-ready version control structure with ignored raw data and model binaries

@@ -22,13 +22,16 @@ import pandas as pd
 import seaborn as sns
 from sklearn.compose import ColumnTransformer
 from sklearn.dummy import DummyClassifier
+from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.impute import SimpleImputer
+from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     ConfusionMatrixDisplay,
     accuracy_score,
     classification_report,
     confusion_matrix,
+    fbeta_score,
     f1_score,
     precision_score,
     recall_score,
@@ -36,7 +39,7 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -88,6 +91,53 @@ CATEGORICAL_FEATURES = [
 
 FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 TARGET = "long_trip"
+INITIAL_MODEL_NAME = "Balanced logistic regression"
+FINAL_MODEL_NAME = "Optimized histogram gradient boosting"
+DECISION_RECALL_FLOOR = 0.72
+DECISION_BETA = 0.5
+
+HGB_TUNING_CANDIDATES: list[dict[str, Any]] = [
+    {
+        "candidate": "hgb_depth31_weight4",
+        "max_iter": 250,
+        "learning_rate": 0.06,
+        "max_leaf_nodes": 31,
+        "l2_regularization": 0.0,
+        "class_weight": {0: 1, 1: 4},
+    },
+    {
+        "candidate": "hgb_depth63_weight4",
+        "max_iter": 300,
+        "learning_rate": 0.05,
+        "max_leaf_nodes": 63,
+        "l2_regularization": 0.01,
+        "class_weight": {0: 1, 1: 4},
+    },
+    {
+        "candidate": "hgb_depth31_balanced",
+        "max_iter": 300,
+        "learning_rate": 0.05,
+        "max_leaf_nodes": 31,
+        "l2_regularization": 0.1,
+        "class_weight": "balanced",
+    },
+    {
+        "candidate": "hgb_depth63_weight6",
+        "max_iter": 200,
+        "learning_rate": 0.08,
+        "max_leaf_nodes": 63,
+        "l2_regularization": 0.1,
+        "class_weight": {0: 1, 1: 6},
+    },
+    {
+        "candidate": "hgb_depth31_weight3",
+        "max_iter": 400,
+        "learning_rate": 0.03,
+        "max_leaf_nodes": 31,
+        "l2_regularization": 0.01,
+        "class_weight": {0: 1, 1: 3},
+    },
+]
 
 # TLC location IDs for Newark, JFK, and LaGuardia airport zones.
 AIRPORT_ZONE_IDS = {1, 132, 138}
@@ -345,8 +395,8 @@ def clean_and_engineer_features(raw: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def make_model() -> Pipeline:
-    """Create an interpretable classification pipeline."""
+def make_logistic_model() -> Pipeline:
+    """Create the initial interpretable logistic classification pipeline."""
     numeric_transformer = Pipeline(
         steps=[
             ("imputer", SimpleImputer(strategy="median")),
@@ -376,17 +426,164 @@ def make_model() -> Pipeline:
     return Pipeline(steps=[("preprocess", preprocessor), ("model", classifier)])
 
 
+def make_hist_gradient_boosting_model(params: dict[str, Any]) -> Pipeline:
+    """Create the optimized model family used during hyperparameter tuning."""
+    numeric_transformer = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="median")),
+        ]
+    )
+    categorical_transformer = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="most_frequent")),
+            (
+                "ordinal",
+                OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1),
+            ),
+        ]
+    )
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("num", numeric_transformer, NUMERIC_FEATURES),
+            ("cat", categorical_transformer, CATEGORICAL_FEATURES),
+        ],
+        verbose_feature_names_out=False,
+    )
+    categorical_indices = list(range(len(NUMERIC_FEATURES), len(FEATURES)))
+    model_params = {key: value for key, value in params.items() if key != "candidate"}
+    classifier = HistGradientBoostingClassifier(
+        categorical_features=categorical_indices,
+        random_state=RANDOM_STATE,
+        **model_params,
+    )
+    return Pipeline(steps=[("preprocess", preprocessor), ("model", classifier)])
+
+
+def make_model() -> Pipeline:
+    """Create the default optimized classification pipeline."""
+    return make_hist_gradient_boosting_model(HGB_TUNING_CANDIDATES[1])
+
+
 def evaluate_predictions(
-    y_true: pd.Series, y_pred: np.ndarray, y_score: np.ndarray
+    y_true: pd.Series,
+    y_pred: np.ndarray,
+    y_score: np.ndarray,
+    threshold: float | None = None,
 ) -> dict[str, Any]:
     """Calculate core classification metrics."""
-    return {
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
+    metrics = {
         "accuracy": round(float(accuracy_score(y_true, y_pred)), 4),
         "precision": round(float(precision_score(y_true, y_pred, zero_division=0)), 4),
         "recall": round(float(recall_score(y_true, y_pred, zero_division=0)), 4),
         "f1": round(float(f1_score(y_true, y_pred, zero_division=0)), 4),
+        "f0_5": round(
+            float(fbeta_score(y_true, y_pred, beta=0.5, zero_division=0)),
+            4,
+        ),
         "roc_auc": round(float(roc_auc_score(y_true, y_score)), 4),
+        "true_negative": int(tn),
+        "false_positive": int(fp),
+        "false_negative": int(fn),
+        "true_positive": int(tp),
     }
+    if threshold is not None:
+        metrics["decision_threshold"] = round(float(threshold), 4)
+    return metrics
+
+
+def threshold_search(
+    y_true: pd.Series,
+    y_score: np.ndarray,
+    recall_floor: float = DECISION_RECALL_FLOOR,
+    beta: float = DECISION_BETA,
+) -> tuple[float, pd.DataFrame]:
+    """Choose a probability threshold on validation data."""
+    rows: list[dict[str, Any]] = []
+    for threshold in np.round(np.arange(0.05, 0.951, 0.01), 2):
+        y_pred = (y_score >= threshold).astype(int)
+        precision = precision_score(y_true, y_pred, zero_division=0)
+        recall = recall_score(y_true, y_pred, zero_division=0)
+        rows.append(
+            {
+                "threshold": float(threshold),
+                "accuracy": float(accuracy_score(y_true, y_pred)),
+                "precision": float(precision),
+                "recall": float(recall),
+                "f1": float(f1_score(y_true, y_pred, zero_division=0)),
+                "f0_5": float(
+                    fbeta_score(y_true, y_pred, beta=beta, zero_division=0)
+                ),
+                "predicted_positive_rate": float(np.mean(y_pred)),
+            }
+        )
+
+    threshold_frame = pd.DataFrame(rows)
+    feasible = threshold_frame[threshold_frame["recall"] >= recall_floor]
+    selection_frame = feasible if not feasible.empty else threshold_frame
+    selected = selection_frame.sort_values(
+        ["f0_5", "accuracy", "precision"],
+        ascending=[False, False, False],
+    ).iloc[0]
+    return float(selected["threshold"]), threshold_frame
+
+
+def tune_hist_gradient_boosting(
+    x_train: pd.DataFrame,
+    y_train: pd.Series,
+    x_validation: pd.DataFrame,
+    y_validation: pd.Series,
+) -> tuple[Pipeline, float, dict[str, Any], pd.DataFrame]:
+    """Tune gradient boosting hyperparameters and decision threshold."""
+    tuning_rows: list[dict[str, Any]] = []
+    best_model: Pipeline | None = None
+    best_threshold = 0.5
+    best_candidate: dict[str, Any] | None = None
+    best_score_key = (-np.inf, -np.inf, -np.inf)
+
+    for candidate in HGB_TUNING_CANDIDATES:
+        model = make_hist_gradient_boosting_model(candidate)
+        model.fit(x_train, y_train)
+        validation_score = model.predict_proba(x_validation)[:, 1]
+        threshold, _ = threshold_search(y_validation, validation_score)
+        validation_pred = (validation_score >= threshold).astype(int)
+        metrics = evaluate_predictions(
+            y_validation,
+            validation_pred,
+            validation_score,
+            threshold=threshold,
+        )
+        row = {
+            "candidate": candidate["candidate"],
+            "model": FINAL_MODEL_NAME,
+            "selected_threshold": round(float(threshold), 4),
+            "max_iter": candidate["max_iter"],
+            "learning_rate": candidate["learning_rate"],
+            "max_leaf_nodes": candidate["max_leaf_nodes"],
+            "l2_regularization": candidate["l2_regularization"],
+            "class_weight": json.dumps(candidate["class_weight"]),
+            "selection_metric": "validation_f0_5_with_recall_floor",
+            "validation_recall_floor": DECISION_RECALL_FLOOR,
+            **{f"validation_{key}": value for key, value in metrics.items()},
+        }
+        tuning_rows.append(row)
+        score_key = (
+            metrics["f0_5"],
+            metrics["accuracy"],
+            metrics["precision"],
+        )
+        if score_key > best_score_key:
+            best_score_key = score_key
+            best_model = model
+            best_threshold = threshold
+            best_candidate = candidate
+
+    if best_model is None or best_candidate is None:
+        raise RuntimeError("No tuned model candidate was selected.")
+
+    tuning_frame = pd.DataFrame(tuning_rows)
+    tuning_frame["selected"] = tuning_frame["candidate"] == best_candidate["candidate"]
+    return best_model, best_threshold, best_candidate, tuning_frame
 
 
 def coefficient_summary(model: Pipeline) -> pd.DataFrame:
@@ -416,12 +613,48 @@ def coefficient_summary(model: Pipeline) -> pd.DataFrame:
     return frame.sort_values("absolute_coefficient", ascending=False)
 
 
+def feature_importance_summary(
+    model: Pipeline,
+    x_test: pd.DataFrame,
+    y_test: pd.Series,
+    max_rows: int = 15_000,
+) -> pd.DataFrame:
+    """Estimate final model feature importance with held-out permutation tests."""
+    if len(x_test) > max_rows:
+        x_importance = x_test.sample(n=max_rows, random_state=RANDOM_STATE)
+        y_importance = y_test.loc[x_importance.index]
+    else:
+        x_importance = x_test
+        y_importance = y_test
+
+    result = permutation_importance(
+        model,
+        x_importance,
+        y_importance,
+        scoring="roc_auc",
+        n_repeats=5,
+        random_state=RANDOM_STATE,
+        n_jobs=-1,
+    )
+    frame = pd.DataFrame(
+        {
+            "feature": list(x_importance.columns),
+            "importance_mean": result.importances_mean,
+            "importance_std": result.importances_std,
+            "scoring": "roc_auc",
+        }
+    )
+    return frame.sort_values("importance_mean", ascending=False)
+
+
 def create_figures(
     df: pd.DataFrame,
     model: Pipeline,
     y_test: pd.Series,
     y_pred: np.ndarray,
+    feature_importance: pd.DataFrame,
     report_dir: Path,
+    initial_model: Pipeline | None = None,
 ) -> None:
     """Create EDA and model evaluation figures."""
     figure_dir = report_dir / "figures"
@@ -484,12 +717,34 @@ def create_figures(
         display_labels=["Under 30 min", "30+ min"],
     )
     display.plot(cmap="Blues", values_format="d")
-    plt.title("Logistic Model Confusion Matrix")
+    plt.title("Optimized Model Confusion Matrix")
     plt.tight_layout()
     plt.savefig(figure_dir / "confusion_matrix.png", dpi=180)
     plt.close()
 
-    coefficient_frame = coefficient_summary(model).head(15)
+    positive_importance = feature_importance[feature_importance["importance_mean"] > 0]
+    importance_frame = positive_importance.head(10).sort_values(
+        "importance_mean",
+        ascending=True,
+    )
+    plt.figure(figsize=(9, 5.5))
+    sns.barplot(
+        data=importance_frame,
+        y="feature",
+        x="importance_mean",
+        color="#2f6f73",
+    )
+    plt.title("Optimized Model Feature Importance")
+    plt.xlabel("Mean ROC-AUC decrease after permutation")
+    plt.ylabel("")
+    plt.tight_layout()
+    plt.savefig(figure_dir / "feature_importance.png", dpi=180)
+    plt.close()
+
+    if initial_model is None:
+        return
+
+    coefficient_frame = coefficient_summary(initial_model).head(15)
     plt.figure(figsize=(9, 6))
     sns.barplot(
         data=coefficient_frame,
@@ -503,7 +758,7 @@ def create_figures(
         },
     )
     plt.axvline(0, color="black", linewidth=0.8)
-    plt.title("Top Logistic Regression Coefficients")
+    plt.title("Initial Logistic Regression Coefficients")
     plt.xlabel("Standardized coefficient")
     plt.ylabel("")
     plt.legend(loc="lower right")
@@ -519,10 +774,16 @@ def write_outputs(
     preprocessing_audit: pd.DataFrame,
     feature_summary: pd.DataFrame,
     split_summary: dict[str, Any],
-    metrics: dict[str, Any],
     baseline_metrics: dict[str, Any],
+    initial_metrics: dict[str, Any],
+    final_metrics: dict[str, Any],
+    selected_candidate: dict[str, Any],
+    final_threshold: float,
+    tuning_results: pd.DataFrame,
     report: str,
-    model: Pipeline,
+    final_model: Pipeline,
+    initial_model: Pipeline,
+    feature_importance: pd.DataFrame,
     report_dir: Path,
     model_dir: Path,
 ) -> None:
@@ -552,8 +813,21 @@ def write_outputs(
             "positive_class": "long_trip = 1 means trip duration is at least 30 minutes",
         },
         "train_test_split": split_summary,
+        "model_optimization": {
+            "selected_model": FINAL_MODEL_NAME,
+            "selected_candidate": selected_candidate,
+            "decision_threshold": round(float(final_threshold), 4),
+            "selection_metric": "validation F0.5 with recall >= 0.72",
+            "reason": (
+                "F0.5 emphasizes precision while the recall floor keeps the model "
+                "useful for long-trip planning."
+            ),
+        },
         "baseline_most_frequent": baseline_metrics,
-        "logistic_regression": metrics,
+        "initial_logistic_regression": initial_metrics,
+        "logistic_regression": initial_metrics,
+        "optimized_hist_gradient_boosting": final_metrics,
+        "optimized_model": final_metrics,
         "classification_report": report,
     }
 
@@ -562,11 +836,13 @@ def write_outputs(
 
     preprocessing_audit.to_csv(report_dir / "preprocessing_audit.csv", index=False)
     feature_summary.to_csv(report_dir / "feature_engineering_summary.csv", index=False)
+    tuning_results.to_csv(report_dir / "tuning_results.csv", index=False)
 
     pd.DataFrame(
         [
             {"model": "Most frequent baseline", **baseline_metrics},
-            {"model": "Balanced logistic regression", **metrics},
+            {"model": INITIAL_MODEL_NAME, **initial_metrics},
+            {"model": FINAL_MODEL_NAME, **final_metrics},
         ]
     ).to_csv(report_dir / "model_metrics.csv", index=False)
 
@@ -587,8 +863,12 @@ def write_outputs(
         ]
     ).to_csv(report_dir / "target_distribution.csv", index=False)
 
-    coefficient_summary(model).to_csv(report_dir / "model_coefficients.csv", index=False)
-    joblib.dump(model, model_dir / "long_trip_logistic_model.joblib")
+    coefficient_summary(initial_model).to_csv(
+        report_dir / "model_coefficients.csv",
+        index=False,
+    )
+    feature_importance.to_csv(report_dir / "model_feature_importance.csv", index=False)
+    joblib.dump(final_model, model_dir / "long_trip_optimized_model.joblib")
 
 
 def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
@@ -629,19 +909,28 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
 
     x = df[FEATURES]
     y = df[TARGET]
-    x_train, x_test, y_train, y_test = train_test_split(
+    x_development, x_test, y_development, y_test = train_test_split(
         x,
         y,
         test_size=0.2,
         random_state=RANDOM_STATE,
         stratify=y,
     )
+    x_train, x_validation, y_train, y_validation = train_test_split(
+        x_development,
+        y_development,
+        test_size=0.25,
+        random_state=RANDOM_STATE,
+        stratify=y_development,
+    )
     split_summary = {
-        "split_method": "80/20 stratified train-test split",
+        "split_method": "60/20/20 stratified train-validation-test split",
         "random_state": RANDOM_STATE,
         "train_rows": int(len(x_train)),
+        "validation_rows": int(len(x_validation)),
         "test_rows": int(len(x_test)),
         "train_long_trip_rate": round(float(y_train.mean()), 4),
+        "validation_long_trip_rate": round(float(y_validation.mean()), 4),
         "test_long_trip_rate": round(float(y_test.mean()), 4),
     }
 
@@ -651,11 +940,28 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
     baseline_score = np.repeat(y_train.mean(), repeats=len(y_test))
     baseline_metrics = evaluate_predictions(y_test, baseline_pred, baseline_score)
 
-    model = make_model()
-    model.fit(x_train, y_train)
-    y_pred = model.predict(x_test)
-    y_score = model.predict_proba(x_test)[:, 1]
-    metrics = evaluate_predictions(y_test, y_pred, y_score)
+    initial_model = make_logistic_model()
+    initial_model.fit(x_train, y_train)
+    initial_score = initial_model.predict_proba(x_test)[:, 1]
+    initial_pred = (initial_score >= 0.5).astype(int)
+    initial_metrics = evaluate_predictions(
+        y_test,
+        initial_pred,
+        initial_score,
+        threshold=0.5,
+    )
+
+    final_model, final_threshold, selected_candidate, tuning_results = (
+        tune_hist_gradient_boosting(x_train, y_train, x_validation, y_validation)
+    )
+    y_score = final_model.predict_proba(x_test)[:, 1]
+    y_pred = (y_score >= final_threshold).astype(int)
+    final_metrics = evaluate_predictions(
+        y_test,
+        y_pred,
+        y_score,
+        threshold=final_threshold,
+    )
 
     report = classification_report(
         y_test,
@@ -663,7 +969,16 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
         target_names=["Under 30 min", "30+ min"],
         digits=4,
     )
-    create_figures(df, model, y_test, y_pred, config.report_dir)
+    feature_importance = feature_importance_summary(final_model, x_test, y_test)
+    create_figures(
+        df,
+        final_model,
+        y_test,
+        y_pred,
+        feature_importance,
+        config.report_dir,
+        initial_model=initial_model,
+    )
     write_outputs(
         df,
         raw_rows,
@@ -671,10 +986,16 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
         preprocessing_audit,
         feature_summary,
         split_summary,
-        metrics,
         baseline_metrics,
+        initial_metrics,
+        final_metrics,
+        selected_candidate,
+        final_threshold,
+        tuning_results,
         report,
-        model,
+        final_model,
+        initial_model,
+        feature_importance,
         config.report_dir,
         config.model_dir,
     )
@@ -683,8 +1004,11 @@ def run_pipeline(config: PipelineConfig) -> dict[str, Any]:
         "clean_rows_before_sampling": clean_rows,
         "sample_rows": len(df),
         "long_trip_rate": round(float(df[TARGET].mean()), 4),
-        "metrics": metrics,
+        "initial_metrics": initial_metrics,
+        "optimized_metrics": final_metrics,
         "baseline_metrics": baseline_metrics,
+        "selected_candidate": selected_candidate["candidate"],
+        "decision_threshold": round(float(final_threshold), 4),
     }
 
 

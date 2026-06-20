@@ -1,79 +1,98 @@
-# Real-World AI-Driven Analytics Solution Using Python
+# Deliverable 2: Model Optimization, Real-World Impact, and Ethical Evaluation
 
 ## Project Title
 
 Predicting Long NYC Yellow Taxi Trips for Dispatch and Congestion-Aware Planning
 
-## 1. Introduction and Problem Framing
+## Objective
 
-New York City taxi service is a high-volume transportation system where trip duration affects driver availability, passenger expectations, airport queues, congestion, and shift planning. The stakeholder problem for this project is: **Can a taxi operator or city transportation analyst estimate whether a yellow taxi trip is likely to last at least 30 minutes using structured trip information?**
+This second deliverable refines the Day 1 NYC taxi long-trip model, tunes hyperparameters, evaluates the final optimized model, and reflects on real-world value, ethical limits, and future improvements. The project still predicts the binary target `long_trip`, where `1` means a cleaned yellow taxi trip lasted at least 30 minutes and `0` means it lasted under 30 minutes.
 
-This is a real-world business and societal problem because long trips change how quickly vehicles return to dense pickup areas and how accurately riders can be told what to expect. A long-trip risk estimate can help dispatch teams plan coverage, identify time periods with heavier congestion pressure, and improve operational dashboards. The output should be used as decision support, not as a reason to deny trips or deprioritize neighborhoods.
+The dataset remains the official NYC Taxi and Limousine Commission Yellow Taxi Trip Record file for January 2024. The pipeline cleaned **2,964,624** raw rows down to **2,684,599** realistic trips, then used a deterministic **120,000-row** modeling sample with `random_state=42`. Long trips represented **8.78%** of the modeling sample, so model quality must be judged with precision, recall, F1, F0.5, and ROC-AUC in addition to accuracy.
 
-The analytics goal is a binary classification task. The target variable is `long_trip`, where `1` means the cleaned trip duration is at least 30 minutes and `0` means it is below 30 minutes. I chose this target because it is easy for nontechnical stakeholders to understand and because recall matters: missing too many long trips would reduce the usefulness of the tool for staffing and service planning.
+## 1. Hyperparameter Tuning
 
-## 2. Dataset Exploration and Preprocessing
+The Day 1 model used a class-balanced logistic regression classifier. That model was useful because it was interpretable and had strong long-trip recall, but its precision was modest. In this use case, low precision means the system would warn dispatch teams about too many trips that do not actually become long trips. For Deliverable 2, the optimization goal was to improve accuracy and precision while still retaining enough recall for planning.
 
-The project uses the official NYC Taxi and Limousine Commission Yellow Taxi Trip Record data for January 2024. The data source is the NYC TLC public trip record page, and the pipeline downloads the parquet file directly from the official TLC cloudfront host:
+The final tuning workflow used a **60/20/20 stratified train-validation-test split**. The training set was used to fit candidate models, the validation set was used to choose hyperparameters and the classification threshold, and the test set was held out for final evaluation. This is more rigorous than tuning directly on the test set because it keeps the final test metrics independent from the model-selection step.
 
-- Dataset page: https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page
-- File used: https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-01.parquet
-- Data dictionary: https://www.nyc.gov/assets/tlc/downloads/pdf/data_dictionary_trip_records_yellow.pdf
+The optimized model family was scikit-learn's **histogram gradient boosting classifier**. This model was selected because it can capture nonlinear relationships between trip distance, pickup time, taxi zones, airport trips, and long-trip likelihood. Categorical fields were ordinal-encoded inside a scikit-learn `Pipeline`, and the classifier was told which transformed columns were categorical. This avoids treating taxi zone IDs as simple continuous numeric values.
 
-The raw file contains **2,964,624** yellow taxi trip records. To keep the project reproducible while still realistic, the script reads the official parquet file, cleans the full month, and then uses a deterministic **120,000-row** modeling sample with `random_state=42`. Before sampling, preprocessing retained **2,684,599** realistic trips.
+Five candidate configurations were evaluated by changing `max_iter`, `learning_rate`, `max_leaf_nodes`, `l2_regularization`, and `class_weight`. For each candidate, the validation probabilities were searched across thresholds from 0.05 to 0.95. The threshold selection metric was **F0.5 with validation recall at or above 0.72**. F0.5 weights precision more heavily than recall, which matches the Day 2 request to improve accuracy and precision, while the recall floor prevents the model from becoming too conservative.
 
-Important raw fields included pickup and dropoff timestamps, passenger count, trip distance, pickup and dropoff location IDs, rate code, fare fields, payment type, and total amount. The model intentionally avoids using the target itself or post-outcome leakage such as calculated trip duration as an input feature. The final model features are:
+The selected candidate was:
 
-- Numeric: `trip_distance`, `passenger_count`, `pickup_hour`, `pickup_dayofweek`, `is_weekend`, `airport_trip`
-- Categorical: `VendorID`, `RatecodeID`, `PULocationID`, `DOLocationID`
+- Model: optimized histogram gradient boosting
+- Candidate: `hgb_depth63_weight6`
+- `max_iter`: 200
+- `learning_rate`: 0.08
+- `max_leaf_nodes`: 63
+- `l2_regularization`: 0.1
+- `class_weight`: `{0: 1, 1: 6}`
+- Decision threshold: `0.80`
 
-Several cleaning rules were applied to remove records that would mislead the model or reflect data-entry artifacts rather than normal service. Trips were kept only if the pickup time occurred in January 2024, duration was between 1 and 180 minutes, distance was between 0.1 and 60 miles, passenger count was between 1 and 6, fare and total amount were positive, pickup/dropoff location IDs were valid TLC zone IDs, and rate code was a standard value from 1 to 6. This last rule was added after exploratory review showed that a nonstandard rate code was dominating coefficients, which was a warning sign that the model could learn an artifact rather than a transport pattern.
+The validation tuning table is saved in `reports/tuning_results.csv`. The selected model had the strongest validation F0.5 among candidates that met the recall floor.
 
-Feature engineering converted timestamps into operationally useful time features. `pickup_hour` captures daily demand cycles, `pickup_dayofweek` and `is_weekend` capture commuting and weekend differences, and `airport_trip` identifies trips involving Newark, JFK, or LaGuardia TLC zones. The target label was then created from cleaned trip duration: trips at least 30 minutes long were labeled `1`.
+## 2. Final Model Evaluation
 
-Exploratory analysis showed the cleaned sample is strongly imbalanced. Only **8.78%** of sampled trips were long trips. The median trip duration was **11.6 minutes**, and the median trip distance was **1.7 miles**. Because most trips are short, accuracy alone is a weak metric: a naive model can predict "not long" for every trip and still look accurate. For that reason, the evaluation focuses on recall, F1 score, and ROC-AUC in addition to accuracy.
+The held-out test set contained **24,000** trips with the same **8.78%** long-trip rate as the full modeling sample. A most-frequent baseline still appears accurate because most trips are short, but it fails the real business objective: it never predicts a long trip. The baseline reached **91.22% accuracy** with **0.00 precision**, **0.00 recall**, and **0.00 F1** for the long-trip class.
 
-Generated visualizations are stored in `reports/figures/`:
+The Day 1 logistic regression reference model had strong recall but too many false positives:
 
-- `duration_distribution.png`: distribution of cleaned trip duration with the 30-minute threshold
-- `distance_vs_duration.png`: relationship between distance, duration, and target class
-- `hourly_long_trip_rate.png`: long-trip share by pickup hour
-- `confusion_matrix.png`: held-out test-set performance
-- `top_coefficients.png`: most influential model coefficients
+| Model | Accuracy | Precision | Recall | F1 | F0.5 | ROC-AUC |
+|---|---:|---:|---:|---:|---:|---:|
+| Most frequent baseline | 0.9122 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.5000 |
+| Balanced logistic regression | 0.9176 | 0.5183 | 0.8647 | 0.6482 | 0.5635 | 0.9622 |
+| Optimized histogram gradient boosting | 0.9580 | 0.7954 | 0.7029 | 0.7463 | 0.7750 | 0.9745 |
 
-Detailed preprocessing evidence is saved in `reports/preprocessing_audit.csv`, `reports/feature_engineering_summary.csv`, and `reports/target_distribution.csv`. These files show the row counts before and after each cleaning rule, the exact engineered features, and the final target balance used for modeling.
+The optimized model is a stronger final model for the Day 2 objective. Accuracy improved from **0.9176** to **0.9580**, precision improved from **0.5183** to **0.7954**, F1 improved from **0.6482** to **0.7463**, and ROC-AUC improved from **0.9622** to **0.9745** compared with the logistic regression reference. This means the model now makes far fewer false long-trip warnings while maintaining useful coverage of real long trips.
 
-## 3. Initial Model Development
+The final confusion matrix on the test set was:
 
-The initial AI model is a **class-balanced logistic regression classifier** implemented with scikit-learn. I chose logistic regression because it is fast, reproducible, and more explainable than a black-box model. Since this is an early-stage analytics solution for operational stakeholders, interpretability is valuable: the team can explain why the model produces higher or lower long-trip risk instead of only reporting predictions.
+| Outcome | Count |
+|---|---:|
+| True negatives | 21,512 |
+| False positives | 381 |
+| False negatives | 626 |
+| True positives | 1,481 |
 
-The model pipeline uses a `ColumnTransformer`. Numeric fields are median-imputed and standardized. Categorical fields are imputed with the most frequent value and one-hot encoded with `handle_unknown="ignore"` so the model can safely process future trips containing categories not seen during training. The data is split into an 80% training set and a 20% held-out test set using stratification so the long-trip rate is preserved in both sets.
+Compared with the logistic model, the optimized model reduced false positives from **1,693** to **381**. That is the main precision gain. The tradeoff is that false negatives increased from **285** to **626**, so the optimized model misses more long trips than the recall-focused logistic model. This tradeoff is acceptable for the stated Day 2 goal because the final model is intended as a practical planning signal where accuracy and precision matter. If the stakeholder later decides that missed long trips are more costly than extra alerts, the threshold can be lowered using the saved probability outputs and validation table.
 
-The baseline model is a most-frequent classifier. Because long trips are uncommon, this baseline predicts every test trip as under 30 minutes. It reaches **91.22% accuracy**, but it has **0.00 recall** and **0.00 F1** for long trips. This confirms why accuracy is not enough for this problem.
+Feature importance was estimated with held-out permutation importance using ROC-AUC as the scoring metric. The most important feature was `trip_distance`, which is expected because longer distances are more likely to last 30 minutes or more. Time and location features also mattered: `pickup_hour`, `DOLocationID`, `PULocationID`, and `pickup_dayofweek` were the next strongest contributors. This confirms that the final model is learning plausible transportation patterns rather than relying on a single artifact.
 
-The balanced logistic regression model produced the following test-set results:
+Generated evaluation artifacts are saved in:
 
-| Model | Accuracy | Precision | Recall | F1 | ROC-AUC |
-|---|---:|---:|---:|---:|---:|
-| Most frequent baseline | 0.9122 | 0.0000 | 0.0000 | 0.0000 | 0.5000 |
-| Balanced logistic regression | 0.9170 | 0.5162 | 0.8624 | 0.6458 | 0.9627 |
+- `reports/model_metrics.csv`
+- `reports/metrics.json`
+- `reports/tuning_results.csv`
+- `reports/model_feature_importance.csv`
+- `reports/figures/confusion_matrix.png`
+- `reports/figures/feature_importance.png`
 
-The model improves the assignment-relevant outcome because it identifies most long trips instead of ignoring the minority class. Recall of **86.24%** means the model catches most 30-minute-plus trips in the held-out test set. Precision of **51.62%** means that about half of predicted long trips are actually long, which is acceptable for an early warning signal but not enough for high-stakes automated decisions.
+## 3. Ethical Considerations
 
-The most influential coefficient is `trip_distance`, which has the strongest positive relationship with long-trip risk. Location features also matter, showing that pickup and dropoff zones carry information about likely duration. This is useful operationally, but it creates an ethical caution: location can act as a proxy for neighborhood, income, airport access, or commuting patterns. Therefore, this model should support aggregate planning and human review, not individual service exclusion.
+This model does not use names, phone numbers, exact addresses, race, gender, or other direct personal identifiers. However, it still uses pickup and dropoff taxi zone IDs. Location data can reflect neighborhood-level patterns related to income, commuting access, airport travel, tourism, disability access, and historical service availability. Because of that, the model must be treated as a decision-support tool rather than an automated authority.
 
-Recommended next iterations are to validate the model on multiple months, add weather and event data, compare with tree-based models, calibrate predicted probabilities, and evaluate performance by borough or taxi zone to check whether errors concentrate unfairly in specific neighborhoods.
+The main ethical risk is misuse. A long-trip prediction could be helpful for dispatch planning, but it could become harmful if used to discourage drivers from accepting certain trips, avoid certain neighborhoods, penalize drivers for route outcomes, or justify unequal service. The model also learns from historical taxi behavior, so it may reproduce existing patterns instead of describing what fair transportation service should look like.
 
-## 4. Team Collaboration Process
+The final model's higher precision reduces unnecessary long-trip warnings, but ethical evaluation cannot stop at aggregate accuracy. Future audits should measure false-positive and false-negative rates by pickup zone, dropoff zone, time of day, weekday/weekend, and airport-trip status. If errors concentrate in specific neighborhoods or time periods, the model should be revised before being used in operations. Clear documentation should also state that the probability is an estimate, not a guarantee.
 
-The project was organized as a small analytics team workflow. One role focused on stakeholder framing and ethical risk, one on data engineering and preprocessing, one on model development, and one on report quality assurance. GitHub was used as the version-control system, with a feature branch for the NYC taxi analytics implementation and clear tracked deliverables for code, report, metrics, and generated figures.
+## 4. Real-World Application
 
-The collaboration process followed an iterative lifecycle. First, the team selected NYC Taxi data because it matched the transportation dataset option and had enough size and complexity for meaningful preprocessing. Second, the data pipeline was built to download the official file instead of relying on a manually copied dataset. Third, exploratory outputs were reviewed before finalizing cleaning rules. The nonstandard `RatecodeID` issue was caught during coefficient review, and preprocessing was updated to keep only standard rate codes. Finally, the report was written from the actual model metrics so the narrative matched the reproducible outputs.
+A practical use of this model is an operational dashboard for taxi dispatch teams, fleet managers, airport queue monitors, or city transportation analysts. Before or near the beginning of a trip, the system can estimate whether the trip is likely to last at least 30 minutes using distance, pickup hour, day of week, airport flag, vendor, rate code, and pickup/dropoff zones. The output can be shown as a probability and a long-trip flag based on the tuned threshold.
 
-For Google Colab collaboration, teammates can clone the repository, install `requirements.txt`, and run `src/nyc_taxi_long_trip_model.py`. The repository avoids committing large raw data files, which keeps GitHub clean while making the analysis reproducible from the public TLC source.
+For dispatch teams, the model can help estimate when vehicles may be unavailable for longer periods. This can improve driver shift planning, airport staging, and service coverage in high-demand areas. For city analysts, aggregated long-trip predictions can help identify times and zones where congestion or long-distance travel patterns may be increasing. For customer-facing systems, the probability could support better wait-time messaging, as long as it is framed carefully and not treated as a precise duration estimate.
 
-## Ethical Reflection
+The model should be deployed with human oversight. A dashboard should show aggregate counts, probability bands, and uncertainty rather than only a hard yes/no label. For example, trips could be grouped as low, medium, or high long-trip risk. Dispatchers could use those signals to plan coverage, but the system should not automatically deny service, change driver pay, or rank neighborhoods. The tuned threshold of **0.80** is appropriate for the current precision-focused objective, but it should be revisited if business priorities change.
 
-This model does not use rider names, exact addresses, race, gender, or other direct personal identifiers. However, transportation location data still has ethical risk because pickup and dropoff zones can reveal patterns about neighborhoods and access to mobility. A model trained on historical trips can also reproduce historical service patterns rather than an ideal public-service objective.
+The current pipeline is reproducible and collaboration-ready. It uses pandas and NumPy for data manipulation, Matplotlib and Seaborn for visualization, scikit-learn for modeling and evaluation, Google Colab-compatible notebooks for collaboration, and GitHub for version control. Dask remains optional for future scaling if the team expands from a 120,000-row modeling sample to multiple months or full-year training.
 
-The safest use is aggregate planning: estimating when and where long trips may affect vehicle availability. The model should not be used to reject rides, discourage service to specific areas, punish drivers, or set prices without additional fairness review. Future versions should include subgroup error analysis by zone and time period, monitor model drift, and document limitations clearly for decision-makers.
+Operational deployment would require several additional steps. First, the model should be validated on months beyond January 2024 to check seasonality and drift. Second, probability calibration should be tested so probability values can be trusted for dashboard bands. Third, subgroup error monitoring should be added by zone and time period. Fourth, model retraining should be scheduled when travel patterns change due to weather, holidays, construction, major events, or policy changes.
+
+## 5. Final Thoughts and Conclusion
+
+Deliverable 2 improved the model from an interpretable recall-focused baseline into a stronger optimized classifier. The final histogram gradient boosting model achieved **95.80% accuracy**, **79.54% precision**, **70.29% recall**, **74.63% F1**, and **97.45% ROC-AUC** on the held-out test set. The biggest practical improvement was precision: the model now produces far fewer false long-trip alerts than the Day 1 logistic regression model.
+
+The project also shows why optimization is not only about raising one metric. The selected threshold improved precision and accuracy, but it reduced recall compared with logistic regression. That tradeoff is acceptable for this deliverable because the objective emphasized accuracy and precision. In a different operational setting, the threshold could be adjusted to catch more long trips at the cost of more false alerts.
+
+The final recommendation is to use this model for aggregate planning, not automated service decisions. It can help teams anticipate long-trip pressure, understand transportation patterns, and plan resources more effectively. Future work should validate the model across multiple months, add contextual data such as weather and events, calibrate probabilities, and run fairness/error audits by zone and time. With those safeguards, the model can become a useful real-world analytics tool while respecting the ethical limits of transportation prediction.
