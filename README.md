@@ -70,6 +70,7 @@ To use a smaller sample while testing:
 - Written Deliverable 2 report: `reports/assignment_report.md`
 - Reproducible Python pipeline: `src/nyc_taxi_long_trip_model.py`
 - New-trip prediction notebook: `notebooks/predict_new_taxi_trip.ipynb`
+- Full one-file PDF submission packet: `output/pdf/NYC_Taxi_Deliverable_2_Full_Submission_Report.pdf`
 - One-file submission PDF: `output/pdf/NYC_Taxi_AI_Analytics_Submission_Guide.pdf`
 - Generated model metrics: `reports/metrics.json` and `reports/model_metrics.csv`
 - Hyperparameter tuning results: `reports/tuning_results.csv`
