@@ -10,6 +10,9 @@ data/processed/
 # Local model binaries can be regenerated with the pipeline.
 models/*.joblib
 
+# PDF render QA images are regenerated locally.
+output/pdf/rendered_*/
+
 # OS/editor noise
 .DS_Store
 Thumbs.db
