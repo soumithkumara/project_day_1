@@ -265,6 +265,16 @@ def pct_delta(new: float, old: float) -> str:
     return f"{(new - old) * 100:+.2f} pts"
 
 
+def format_class_weight(value: object) -> str:
+    if not isinstance(value, dict):
+        return str(value)
+    try:
+        items = sorted(value.items(), key=lambda item: int(item[0]))
+    except (TypeError, ValueError):
+        items = sorted(value.items(), key=lambda item: str(item[0]))
+    return "{" + ", ".join(f"{key}: {weight}" for key, weight in items) + "}"
+
+
 def build_document():
     metrics = read_json(REPORTS / "metrics.json")
     model_rows = read_csv(REPORTS / "model_metrics.csv")
@@ -275,6 +285,7 @@ def build_document():
     final = metrics["optimized_hist_gradient_boosting"]
     selected = metrics["model_optimization"]["selected_candidate"]
     selected_tuning = next(row for row in tuning_rows if row["selected"] == "True")
+    class_weight_text = format_class_weight(selected["class_weight"])
 
     doc = Document()
     configure_document(doc)
@@ -297,7 +308,7 @@ def build_document():
     )
     add_para(
         doc,
-        f"The optimized model family is histogram gradient boosting. Five candidate configurations were evaluated by changing max_iter, learning_rate, max_leaf_nodes, l2_regularization, class_weight, and the final classification threshold. The selected candidate was {selected['candidate']}, with max_iter = {selected['max_iter']}, learning_rate = {selected['learning_rate']}, max_leaf_nodes = {selected['max_leaf_nodes']}, l2_regularization = {selected['l2_regularization']}, and class_weight = {{0: 1, 1: 6}}. The final decision threshold was {metrics['model_optimization']['decision_threshold']:.2f}. Threshold selection used validation F0.5 with recall at or above 0.72, so precision was prioritized without allowing the model to ignore too many long trips.",
+        f"The optimized model family is histogram gradient boosting. Five candidate configurations were evaluated by changing max_iter, learning_rate, max_leaf_nodes, l2_regularization, class_weight, and the final classification threshold. The selected candidate was {selected['candidate']}, with max_iter = {selected['max_iter']}, learning_rate = {selected['learning_rate']}, max_leaf_nodes = {selected['max_leaf_nodes']}, l2_regularization = {selected['l2_regularization']}, and class_weight = {class_weight_text}. The final decision threshold was {metrics['model_optimization']['decision_threshold']:.2f}. Threshold selection used {metrics['model_optimization']['selection_metric']}, so precision was prioritized while requiring recall to stay at least as strong as the Day 1 logistic reference.",
     )
 
     add_table(
@@ -320,11 +331,11 @@ def build_document():
     )
     add_para(
         doc,
-        f"The optimized model improved the Day 1 model in the areas requested for Deliverable 2. Accuracy increased from {initial['accuracy']:.4f} to {final['accuracy']:.4f}, precision increased from {initial['precision']:.4f} to {final['precision']:.4f}, F1 increased from {initial['f1']:.4f} to {final['f1']:.4f}, and ROC-AUC increased from {initial['roc_auc']:.4f} to {final['roc_auc']:.4f}. The largest practical gain was precision: false positives dropped from {initial['false_positive']:,} to {final['false_positive']:,}. This means the optimized system produces far fewer unnecessary long-trip warnings.",
+        f"The optimized model improved the Day 1 model in the areas requested for Deliverable 2. Accuracy increased from {initial['accuracy']:.4f} to {final['accuracy']:.4f}, precision increased from {initial['precision']:.4f} to {final['precision']:.4f}, recall increased from {initial['recall']:.4f} to {final['recall']:.4f}, F1 increased from {initial['f1']:.4f} to {final['f1']:.4f}, and ROC-AUC increased from {initial['roc_auc']:.4f} to {final['roc_auc']:.4f}. The largest practical gain was precision: false positives dropped from {initial['false_positive']:,} to {final['false_positive']:,}. This means the optimized system produces far fewer unnecessary long-trip warnings.",
     )
     add_para(
         doc,
-        f"The tradeoff is recall. The logistic model caught {initial['recall'] * 100:.2f}% of actual long trips, while the optimized model caught {final['recall'] * 100:.2f}%. This happened because the final threshold was intentionally raised to 0.80 to reduce false positives and make predictions more precise. For a dispatch dashboard or planning tool, this is a reasonable tradeoff when the goal is to avoid too many false alerts. If stakeholders later decide that missed long trips are more costly than extra warnings, the threshold can be lowered without retraining the model.",
+        f"The earlier strict-threshold version improved precision but did not protect long-trip recall, so the final tuning rule was revised. The logistic model caught {initial['recall'] * 100:.2f}% of actual long trips, while the optimized model now catches {final['recall'] * 100:.2f}%. The selected threshold of {final['decision_threshold']:.2f} keeps long-trip recall slightly above the logistic reference while still reducing unnecessary long-trip warnings.",
     )
 
     metric_rows = []
@@ -361,7 +372,7 @@ def build_document():
 
     add_para(
         doc,
-        f"The final confusion matrix also shows the effect of the changes. The optimized model produced {final['true_positive']:,} true positives, {final['true_negative']:,} true negatives, {final['false_positive']:,} false positives, and {final['false_negative']:,} false negatives. Compared with the logistic model, the optimized model reduced false positives by {initial['false_positive'] - final['false_positive']:,}, which explains the precision improvement. It also increased false negatives by {final['false_negative'] - initial['false_negative']:,}, which explains the recall decrease.",
+        f"The final confusion matrix also shows the effect of the changes. The optimized model produced {final['true_positive']:,} true positives, {final['true_negative']:,} true negatives, {final['false_positive']:,} false positives, and {final['false_negative']:,} false negatives. Compared with the logistic model, the optimized model reduced false positives by {initial['false_positive'] - final['false_positive']:,} and reduced false negatives by {initial['false_negative'] - final['false_negative']:,}. This means the final model is both less noisy and slightly better at catching actual long trips.",
     )
 
     add_heading(doc, "3. Ethical Considerations", level=1)
@@ -371,7 +382,7 @@ def build_document():
     )
     add_para(
         doc,
-        "The Day 2 precision improvement reduces unnecessary long-trip alerts, but it does not remove fairness concerns. Higher precision means the model is less likely to incorrectly flag a short trip as long, which is helpful for planning. At the same time, lower recall means some actual long trips are missed. If missed long trips are concentrated in certain zones or times, the model could still create uneven operational attention. Before using this system in production, the team should audit false positives and false negatives by pickup zone, dropoff zone, hour, weekday, weekend, and airport-trip status.",
+        "The Day 2 precision improvement reduces unnecessary long-trip alerts, but it does not remove fairness concerns. Higher precision means the model is less likely to incorrectly flag a short trip as long, which is helpful for planning. The revised threshold also protects recall, so long-trip coverage stays slightly above the logistic reference. Even so, if remaining errors are concentrated in certain zones or times, the model could still create uneven operational attention. Before using this system in production, the team should audit false positives and false negatives by pickup zone, dropoff zone, hour, weekday, weekend, and airport-trip status.",
     )
     add_para(
         doc,
@@ -385,11 +396,11 @@ def build_document():
     )
     add_para(
         doc,
-        "The Day 2 changes make the model more useful for this real-world setting because the optimized model is less noisy. The logistic model produced many false positives, which could cause dispatchers to overreact. The optimized model raises precision to 0.7954, so a long-trip alert is more trustworthy. Accuracy also increased to 0.9580, and ROC-AUC increased to 0.9745, meaning the model separates long and short trips more effectively across probability thresholds.",
+        f"The Day 2 changes make the model more useful for this real-world setting because the optimized model is less noisy without sacrificing long-trip coverage. The logistic model produced many false positives, which could cause dispatchers to overreact. The optimized model raises precision to {final['precision']:.4f}, so a long-trip alert is more trustworthy. Accuracy also increased to {final['accuracy']:.4f}, recall increased to {final['recall']:.4f}, and ROC-AUC increased to {final['roc_auc']:.4f}, meaning the model separates long and short trips more effectively across probability thresholds.",
     )
     add_para(
         doc,
-        "The system should still show probability bands rather than only a hard class label. For example, trips could be grouped as low, medium, or high long-trip risk. The tuned 0.80 threshold can be used for a high-confidence long-trip flag, while lower thresholds can support monitoring dashboards when recall is more important. This gives stakeholders flexibility without retraining the model every time business priorities change.",
+        f"The system should still show probability bands rather than only a hard class label. For example, trips could be grouped as low, medium, or high long-trip risk. The tuned {final['decision_threshold']:.2f} threshold can be used for the main operational long-trip flag because it balances better precision with recall that stays above the logistic reference. Other thresholds can still support monitoring dashboards when stakeholders want to favor either extra caution or fewer alerts. This gives stakeholders flexibility without retraining the model every time business priorities change.",
     )
     add_para(
         doc,
@@ -399,11 +410,11 @@ def build_document():
     add_heading(doc, "5. Final Thoughts and Conclusion", level=1)
     add_para(
         doc,
-        "Deliverable 2 successfully refined the Day 1 model into a stronger optimized classifier. The main technical changes were the addition of a validation set, the use of histogram gradient boosting, systematic hyperparameter tuning, validation-based threshold selection, and final model feature-importance reporting. These changes made the model more accurate and much more precise.",
+        "Deliverable 2 successfully refined the Day 1 model into a stronger optimized classifier. The main technical changes were the addition of a validation set, the use of histogram gradient boosting, systematic hyperparameter tuning, validation-based threshold selection, and final model feature-importance reporting. These changes made the model more accurate and more precise while keeping long-trip recall protected.",
     )
     add_para(
         doc,
-        f"The final model achieved {final['accuracy'] * 100:.2f}% accuracy, {final['precision'] * 100:.2f}% precision, {final['recall'] * 100:.2f}% recall, {final['f1'] * 100:.2f}% F1, and {final['roc_auc'] * 100:.2f}% ROC-AUC on the held-out test set. The result is not simply better in every metric: recall decreased because the model was tuned to reduce false positives. That tradeoff is important to state clearly. For the current objective of improving accuracy and precision, the optimized model is the better final choice. For a future objective that values catching every possible long trip, the threshold should be lowered and evaluated again.",
+        f"The final model achieved {final['accuracy'] * 100:.2f}% accuracy, {final['precision'] * 100:.2f}% precision, {final['recall'] * 100:.2f}% recall, {final['f1'] * 100:.2f}% F1, and {final['roc_auc'] * 100:.2f}% ROC-AUC on the held-out test set. After retuning, the result is better than the Day 1 logistic reference across the main metrics, including recall. The important tradeoff is now threshold flexibility: a stricter threshold can raise precision further, but the submitted threshold is the better final choice because it improves precision while keeping recall above the logistic reference.",
     )
     add_para(
         doc,

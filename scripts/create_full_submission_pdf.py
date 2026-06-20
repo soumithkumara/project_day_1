@@ -117,6 +117,60 @@ def metric_change(new: float, old: float) -> str:
     return f"{(new - old) * 100:+.2f} pts"
 
 
+def format_class_weight(value: object) -> str:
+    if not isinstance(value, dict):
+        return str(value)
+    try:
+        items = sorted(value.items(), key=lambda item: int(item[0]))
+    except (TypeError, ValueError):
+        items = sorted(value.items(), key=lambda item: str(item[0]))
+    return "{" + ", ".join(f"{key}: {weight}" for key, weight in items) + "}"
+
+
+def safe_divide(numerator: float, denominator: float) -> float:
+    return numerator / denominator if denominator else 0.0
+
+
+def binary_f1(precision: float, recall: float) -> float:
+    return safe_divide(2 * precision * recall, precision + recall)
+
+
+def classification_summary_rows(final: dict) -> list[list[str]]:
+    tn = final["true_negative"]
+    fp = final["false_positive"]
+    fn = final["false_negative"]
+    tp = final["true_positive"]
+    support_under = tn + fp
+    support_long = tp + fn
+    total = support_under + support_long
+
+    under_precision = safe_divide(tn, tn + fn)
+    under_recall = safe_divide(tn, tn + fp)
+    under_f1 = binary_f1(under_precision, under_recall)
+    long_precision = final["precision"]
+    long_recall = final["recall"]
+    long_f1 = final["f1"]
+    weighted_precision = safe_divide(
+        under_precision * support_under + long_precision * support_long,
+        total,
+    )
+    weighted_recall = safe_divide(
+        under_recall * support_under + long_recall * support_long,
+        total,
+    )
+    weighted_f1 = safe_divide(
+        under_f1 * support_under + long_f1 * support_long,
+        total,
+    )
+
+    return [
+        ["Class", "Precision", "Recall", "F1-score", "Support"],
+        ["Under 30 min", f"{under_precision:.4f}", f"{under_recall:.4f}", f"{under_f1:.4f}", f"{support_under:,}"],
+        ["30+ min", f"{long_precision:.4f}", f"{long_recall:.4f}", f"{long_f1:.4f}", f"{support_long:,}"],
+        ["Weighted avg", f"{weighted_precision:.4f}", f"{weighted_recall:.4f}", f"{weighted_f1:.4f}", f"{total:,}"],
+    ]
+
+
 def make_table(
     data: list[list[str]],
     widths: list[float],
@@ -346,6 +400,7 @@ def build_pdf() -> Path:
     initial = metrics["initial_logistic_regression"]
     final = metrics["optimized_hist_gradient_boosting"]
     selected = metrics["model_optimization"]["selected_candidate"]
+    class_weight_text = format_class_weight(selected["class_weight"])
 
     styles = build_styles()
     story: list = []
@@ -406,22 +461,22 @@ def build_pdf() -> Path:
     story.append(para("1. Executive Summary", styles["Section"]))
     story.append(
         para(
-            "The Day 2 work refined the Day 1 taxi long-trip classifier by adding a validation split, testing histogram gradient boosting candidates, tuning model hyperparameters, and selecting a precision-focused probability threshold. The final model predicts whether a trip is likely to last 30 minutes or longer.",
+            "The Day 2 work refined the Day 1 taxi long-trip classifier by adding a validation split, testing histogram gradient boosting candidates, tuning model hyperparameters, and selecting a recall-protected probability threshold. The final model predicts whether a trip is likely to last 30 minutes or longer.",
             styles["Body"],
         )
     )
     story.append(
         para(
-            f"Compared with the Day 1 logistic regression model, the optimized model increased accuracy from {metric(initial, 'accuracy')} to {metric(final, 'accuracy')} and precision from {metric(initial, 'precision')} to {metric(final, 'precision')}. F1 improved from {metric(initial, 'f1')} to {metric(final, 'f1')}, and ROC-AUC improved from {metric(initial, 'roc_auc')} to {metric(final, 'roc_auc')}. Recall decreased from {metric(initial, 'recall')} to {metric(final, 'recall')} because the final threshold was raised to reduce false positives.",
+            f"Compared with the Day 1 logistic regression model, the optimized model increased accuracy from {metric(initial, 'accuracy')} to {metric(final, 'accuracy')}, precision from {metric(initial, 'precision')} to {metric(final, 'precision')}, and recall from {metric(initial, 'recall')} to {metric(final, 'recall')}. F1 improved from {metric(initial, 'f1')} to {metric(final, 'f1')}, and ROC-AUC improved from {metric(initial, 'roc_auc')} to {metric(final, 'roc_auc')}. The final threshold was lowered from the earlier strict version so long-trip recall stays above the logistic reference.",
             styles["Body"],
         )
     )
     add_bullets(
         story,
         [
-            "Primary gain: fewer false long-trip alerts and much stronger precision.",
+            "Primary gain: fewer false long-trip alerts while preserving long-trip recall.",
             f"False positives dropped from {initial['false_positive']:,} to {final['false_positive']:,}.",
-            f"False negatives increased from {initial['false_negative']:,} to {final['false_negative']:,}, which is the cost of the precision-focused threshold.",
+            f"False negatives dropped from {initial['false_negative']:,} to {final['false_negative']:,}.",
             "Recommended use: aggregate planning and decision support, not automated ride denial or neighborhood-level service restriction.",
         ],
         styles["BulletCustom"],
@@ -469,13 +524,13 @@ def build_pdf() -> Path:
     story.append(para("4. Hyperparameter Tuning Details", styles["Section"]))
     story.append(
         para(
-            f"The selected model was {metrics['model_optimization']['selected_model']}. Five histogram-gradient-boosting candidates were tested on the validation set. The selected candidate was {selected['candidate']} with max_iter = {selected['max_iter']}, learning_rate = {selected['learning_rate']}, max_leaf_nodes = {selected['max_leaf_nodes']}, l2_regularization = {selected['l2_regularization']}, class_weight = {{0: 1, 1: 6}}, and a decision threshold of {metrics['model_optimization']['decision_threshold']:.2f}.",
+            f"The selected model was {metrics['model_optimization']['selected_model']}. Five histogram-gradient-boosting candidates were tested on the validation set. The selected candidate was {selected['candidate']} with max_iter = {selected['max_iter']}, learning_rate = {selected['learning_rate']}, max_leaf_nodes = {selected['max_leaf_nodes']}, l2_regularization = {selected['l2_regularization']}, class_weight = {class_weight_text}, and a decision threshold of {metrics['model_optimization']['decision_threshold']:.2f}.",
             styles["Body"],
         )
     )
     story.append(
         para(
-            "The selection metric was validation F0.5 with recall at or above 0.72. F0.5 gives more weight to precision than recall, which matches the assignment request to make the model more accurate and precise, while the recall floor prevents the model from ignoring too many actual long trips.",
+            f"The selection metric was {metrics['model_optimization']['selection_metric']}. F0.5 gives more weight to precision than recall, which matches the assignment request to make the model more accurate and precise, while the higher recall floor keeps long-trip recall above the Day 1 logistic reference.",
             styles["Body"],
         )
     )
@@ -533,12 +588,7 @@ def build_pdf() -> Path:
     ]
     story.append(make_table(impact_table, [1.55, 1.25, 1.35, 1.25], font_size=7.8))
     story.append(para("Final classification report", styles["Subsection"]))
-    classification_table = [
-        ["Class", "Precision", "Recall", "F1-score", "Support"],
-        ["Under 30 min", "0.9717", "0.9826", "0.9771", "21,893"],
-        ["30+ min", "0.7954", "0.7029", "0.7463", "2,107"],
-        ["Weighted avg", "0.9562", "0.9580", "0.9569", "24,000"],
-    ]
+    classification_table = classification_summary_rows(final)
     story.append(make_table(classification_table, [1.6, 0.95, 0.95, 0.95, 0.95], font_size=8.0))
 
     story.append(PageBreak())

@@ -93,7 +93,7 @@ FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 TARGET = "long_trip"
 INITIAL_MODEL_NAME = "Balanced logistic regression"
 FINAL_MODEL_NAME = "Optimized histogram gradient boosting"
-DECISION_RECALL_FLOOR = 0.72
+DECISION_RECALL_FLOOR = 0.865
 DECISION_BETA = 0.5
 
 HGB_TUNING_CANDIDATES: list[dict[str, Any]] = [
@@ -817,10 +817,12 @@ def write_outputs(
             "selected_model": FINAL_MODEL_NAME,
             "selected_candidate": selected_candidate,
             "decision_threshold": round(float(final_threshold), 4),
-            "selection_metric": "validation F0.5 with recall >= 0.72",
+            "selection_metric": (
+                f"validation F0.5 with recall >= {DECISION_RECALL_FLOOR:.3f}"
+            ),
             "reason": (
-                "F0.5 emphasizes precision while the recall floor keeps the model "
-                "useful for long-trip planning."
+                "F0.5 emphasizes precision while the higher recall floor keeps "
+                "long-trip recall above the Day 1 logistic reference."
             ),
         },
         "baseline_most_frequent": baseline_metrics,
